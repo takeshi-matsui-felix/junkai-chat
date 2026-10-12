@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>巡回チャット</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="巡回チャット">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1E3A5F">
+<style>
+  :root {
+    --navy: #1E3A5F;
+    --navy-dark: #152B47;
+    --bg: #E9EDF2;
+    --mine: #1E3A5F;
+    --other: #FFFFFF;
+    --alert: #E8590C;
+    --text: #1B2430;
+    --sub: #6B7785;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-text-size-adjust: 100%;
+  }
+  #app { display: flex; flex-direction: column; height: 100%; }
+  header {
+    background: var(--navy);
+    color: #fff;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: .02em; }
+  header .me {
+    font-size: 12px; opacity: .85; background: none; border: 0; color: #fff; font-family: inherit;
+    padding: 8px 0 8px 12px; text-decoration: underline;
+  }
+  #tabs { display: none; background: var(--navy-dark); }
+  #tabs button {
+    flex: 1; border: 0; background: none; color: #B8C6D8; font-family: inherit; font-size: 15px; font-weight: 700;
+    padding: 11px 8px; border-bottom: 3px solid transparent;
+  }
+  #tabs button[aria-selected="true"] { color: #fff; border-bottom-color: #fff; }
+  #tabs .dot { color: #FF8A4C; font-size: 12px; margin-left: 4px; }
+  #banner {
+    background: #FFF3E0; color: #7A3E00; font-size: 13px; line-height: 1.6;
+    padding: 10px 16px; display: none; border-bottom: 1px solid #F2D4A8;
+  }
+  #banner button {
+    margin-top: 6px; font-size: 14px; padding: 8px 14px; border: 0; border-radius: 8px;
+    background: var(--alert); color: #fff; font-weight: 700;
+  }
+
+  /* ---- 部屋（エリアごとの画面）。PCで両エリアなら左右に並べる ---- */
+  #rooms { flex: 1; min-height: 0; display: none; }
+  .room { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .room.hidden { display: none; }
+  .room-head {
+    display: none; background: #D9E0E9; color: var(--navy); font-weight: 700; font-size: 14px;
+    padding: 8px 16px; border-bottom: 1px solid #C7CFDA;
+  }
+  #rooms.split .room-head { display: block; }
+  #rooms.split .room + .room { border-left: 2px solid #B4C0CE; }
+  @media (min-width: 900px) {
+    #rooms.single .room { max-width: 760px; margin: 0 auto; border-left: 1px solid #D5DBE3; border-right: 1px solid #D5DBE3; }
+    #setup { max-width: 520px; width: 100%; margin: 0 auto; }
+  }
+
+  .list { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
+  .msg { max-width: min(80%, 560px); margin: 0 0 10px; }
+  .msg .who { font-size: 11px; color: var(--sub); margin: 0 4px 2px; }
+  .msg .bubble {
+    padding: 9px 12px; border-radius: 14px; font-size: 15px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word; background: var(--other);
+    border-top-left-radius: 4px;
+  }
+  .msg .at { font-size: 10px; color: var(--sub); margin: 2px 4px 0; }
+  .msg.mine { margin-left: auto; }
+  .msg.mine .who, .msg.mine .at { text-align: right; }
+  .msg.mine .bubble { background: var(--mine); color: #fff; border-top-left-radius: 14px; border-top-right-radius: 4px; }
+  .empty { text-align: center; color: var(--sub); font-size: 13px; margin-top: 40px; }
+  form.send {
+    display: flex; gap: 8px; padding: 8px 10px calc(env(safe-area-inset-bottom, 0px) + 8px);
+    background: #fff; border-top: 1px solid #D5DBE3;
+  }
+  form.send textarea {
+    flex: 1; min-width: 0; resize: none; border: 1px solid #C7CFDA; border-radius: 18px;
+    padding: 9px 14px; font-size: 16px; font-family: inherit; max-height: 120px; line-height: 1.4;
+  }
+  form.send button {
+    border: 0; background: var(--navy); color: #fff; font-weight: 700; font-size: 15px;
+    border-radius: 18px; padding: 0 18px;
+  }
+  form.send button:disabled { opacity: .45; }
+  form.send button.at { background: #E3E8EE; color: var(--navy); padding: 0; width: 40px; flex: none; font-size: 18px; }
+  button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 3px solid #7FB0F0; outline-offset: 2px; }
+
+  #setup { display: none; flex: 1; padding: 28px 22px; overflow-y: auto; }
+  #setup h2 { font-size: 20px; margin: 0 0 6px; }
+  #setup p { font-size: 14px; color: var(--sub); line-height: 1.7; margin: 0 0 20px; }
+  #setup label { display: block; font-size: 13px; font-weight: 700; margin: 14px 0 6px; }
+  #setup input {
+    width: 100%; font-size: 17px; padding: 12px; border: 1px solid #C7CFDA; border-radius: 10px; background: #fff;
+  }
+  #setup button {
+    margin-top: 22px; width: 100%; font-size: 16px; font-weight: 700; padding: 14px;
+    border: 0; border-radius: 10px; background: var(--navy); color: #fff;
+  }
+  #setup .opt {
+    display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 400; margin: 8px 0 0;
+    padding: 12px; border: 1px solid #C7CFDA; border-radius: 10px; background: #fff;
+  }
+  #setup .opt input { width: 20px; height: 20px; margin: 0; padding: 0; }
+  #err { color: #C62828; font-size: 13px; margin-top: 12px; min-height: 18px; }
+  #toast {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 76px);
+    background: #222; color: #fff; padding: 8px 14px; border-radius: 16px; font-size: 13px; display: none; z-index: 20;
+  }
+  .unread-line {
+    display: flex; align-items: center; gap: 10px; margin: 6px 0 14px;
+    font-size: 12px; font-weight: 700; color: #4A5B70;
+  }
+  .unread-line::before, .unread-line::after { content: ''; flex: 1; height: 1px; background: #B4C0CE; }
+  .msg .meta { display: flex; align-items: center; gap: 8px; margin: 2px 4px 0; }
+  .msg.mine .meta { justify-content: flex-end; }
+  .msg .meta .at { margin: 0; }
+  .readmark {
+    border: 0; background: none; padding: 4px 2px; margin: -4px 0;
+    font-size: 11px; font-weight: 700; color: var(--navy); font-family: inherit; text-decoration: underline;
+  }
+  #sheetBg, #actBg {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 10;
+    align-items: flex-end; justify-content: center;
+  }
+  #sheet, #act {
+    background: #fff; width: 100%; max-width: 520px; max-height: 70%; overflow-y: auto;
+    border-radius: 16px 16px 0 0; padding: 18px 20px calc(env(safe-area-inset-bottom, 0px) + 18px);
+  }
+  @media (min-width: 900px) {
+    #sheetBg, #actBg { align-items: center; }
+    #sheet, #act { border-radius: 16px; }
+  }
+  #sheet h3 { margin: 0 0 4px; font-size: 16px; }
+  #sheet .preview, #act .preview { font-size: 12px; color: var(--sub); margin: 0 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #sheet ul { list-style: none; margin: 0; padding: 0; }
+  #sheet li { padding: 10px 2px; border-top: 1px solid #E3E8EE; font-size: 15px; }
+  #sheet button, #act button {
+    margin-top: 10px; width: 100%; font-size: 15px; font-weight: 700; padding: 12px;
+    border: 0; border-radius: 10px; background: var(--navy); color: #fff; font-family: inherit;
+  }
+  #act button.danger { background: #C62828; }
+  #act button.ghost { background: #E3E8EE; color: var(--text); }
+
+  /* 取り消し・返信・メンション */
+  .msg .bubble.deleted, .msg.mine .bubble.deleted {
+    background: transparent; border: 1px dashed #B4C0CE; color: var(--sub); font-size: 13px;
+  }
+  .msg .bubble[role="button"] { cursor: pointer; }
+  .quote {
+    border-left: 3px solid rgba(110,125,145,.7); padding: 2px 8px; margin: 0 0 6px; font-size: 12px; opacity: .9;
+  }
+  .quote b { display: block; font-size: 11px; }
+  .msg.mine .quote { border-left-color: rgba(255,255,255,.65); }
+  .mention { font-weight: 700; color: #B54300; }
+  .msg.mine .mention { color: #FFD2B3; }
+  .msg.tome .bubble { box-shadow: 0 0 0 2px var(--alert); }
+  .msg.flash .bubble { outline: 3px solid #7FB0F0; }
+  .replyBar {
+    display: none; align-items: center; gap: 8px; padding: 8px 12px; background: #F3F6FA;
+    border-top: 1px solid #D5DBE3; font-size: 13px;
+  }
+  .replyBar .rt { flex: 1; min-width: 0; }
+  .replyWho { font-weight: 700; font-size: 12px; color: var(--navy); }
+  .replyText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sub); }
+  .replyCancel { border: 0; background: none; font-size: 22px; padding: 4px 10px; color: var(--sub); }
+  .mentionBox { display: none; max-height: 176px; overflow-y: auto; background: #fff; border-top: 1px solid #D5DBE3; }
+  .mentionBox button {
+    display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #EEF1F5; background: none;
+    font-size: 16px; font-family: inherit; padding: 12px 16px; color: var(--text);
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1 id="title">巡回チャット</h1>
+    <button class="me" id="me" type="button" aria-label="名前とエリアの設定を変更"></button>
+  </header>
+  <div id="tabs" role="tablist" aria-label="エリア切り替え"></div>
+
+  <div id="banner"></div>
+
+  <section id="setup">
+    <h2>はじめに設定します</h2>
+    <p>名前とPASSは、この端末に保存されます。次回からは入力不要です。</p>
+    <label for="inName">お名前（チャットに表示されます）</label>
+    <input id="inName" autocomplete="off" placeholder="例：松井">
+    <label for="inCode">PASS</label>
+    <input id="inCode" type="password" autocomplete="off" placeholder="管理者から聞いたPASS">
+    <label id="areaLabel">担当エリア</label>
+    <div role="radiogroup" aria-labelledby="areaLabel">
+      <label class="opt"><input type="radio" name="area" value="東海">東海</label>
+      <label class="opt"><input type="radio" name="area" value="関東">関東</label>
+      <label class="opt"><input type="radio" name="area" value="東海,関東">両方（本部など。PCは左右に並べて表示、スマホはタブで切り替え）</label>
+    </div>
+    <button id="btnStart" type="button">チャットを始める</button>
+    <div id="err"></div>
+  </section>
+
+  <div id="rooms"></div>
+</div>
+
+<!-- 1つの部屋の部品。エリアの数だけ複製して使う -->
+<template id="roomTpl">
+  <section class="room">
+    <div class="room-head"><span class="room-name"></span></div>
+    <main class="list"></main>
+    <div class="replyBar">
+      <div class="rt"><div class="replyWho"></div><div class="replyText"></div></div>
+      <button class="replyCancel" type="button" aria-label="返信をやめる">×</button>
+    </div>
+    <div class="mentionBox" role="listbox" aria-label="メンションする人"></div>
+    <form class="send">
+      <button class="at" type="button" aria-label="メンション（@）を入れる">＠</button>
+      <textarea rows="1" placeholder="メッセージを入力"></textarea>
+      <button class="btnSend" type="submit">送信</button>
+    </form>
+  </section>
+</template>
+
+<div id="sheetBg">
+  <div id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <h3 id="sheetTitle"></h3>
+    <p class="preview" id="sheetPreview"></p>
+    <ul id="sheetList"></ul>
+    <button id="sheetClose" type="button">閉じる</button>
+  </div>
+</div>
+<div id="actBg">
+  <div id="act" role="dialog" aria-modal="true" aria-label="メッセージの操作">
+    <p class="preview" id="actPreview"></p>
+    <button id="actReply" type="button">返信する</button>
+    <button id="actJump" type="button">元のメッセージへ移動</button>
+    <button id="actCopy" type="button">コピー</button>
+    <button id="actUnsend" class="danger" type="button">送信を取り消す</button>
+    <button id="actClose" class="ghost" type="button">閉じる</button>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
+<script>
+// ★ここ1か所だけ、Apps ScriptのウェブアプリURLに書き換える（/exec で終わるURL）
+var GAS_URL = 'https://script.google.com/macros/s/AKfycbz28hT2-1mwV-O_yRJvzAO2SD2AM1PwZ3_850ZLowWO14kokjxoKYgGaJdYUaQcTSW-/exec';
+
+var VAPID_KEY = 'BEkNoUz_adPTWoQgkoaJXsjrs3UbTWewt0uLGaSYePMtH0FWUxjdtOSNwbSmMTLhmNz-EP9wgYWbSvrHROkjXMg';
+var FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyAYUmDUQ-ft3hjVU7WBXyFvrMt2sXXEmoA',
+  authDomain: 'junkai-chat.firebaseapp.com',
+  projectId: 'junkai-chat',
+  storageBucket: 'junkai-chat.firebasestorage.app',
+  messagingSenderId: '592199751504',
+  appId: '1:592199751504:web:d5e05642dc61610d33fe55'
+};
+
+var $ = function (id) { return document.getElementById(id); };
+var store = {
+  get: function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
+  set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+};
+var AREAS = ['東海', '関東'];
+function parseAreas(s) { return String(s || '').split(',').filter(function (a) { return AREAS.indexOf(a) !== -1; }); }
+
+// 端末ごとの共通の状態。メッセージなど「部屋ごと」の状態は、下の rooms[エリア名] が持つ
+var state = {
+  name: store.get('jc_name'), code: store.get('jc_code'), token: store.get('jc_token'),
+  areas: parseAreas(store.get('jc_areas')), active: '', otherUnread: [], inChat: false
+};
+state.active = state.areas.indexOf(store.get('jc_area')) !== -1 ? store.get('jc_area') : (state.areas[0] || '');
+var rooms = {};
+
+function toast(msg) {
+  var t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  setTimeout(function () { t.style.display = 'none'; }, 2500);
+}
+
+function api(action, payload) {
+  var body = Object.assign({ action: action, code: state.code }, payload || {});
+  return fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // プリフライトを避けるためtext/plainで送る
+    body: JSON.stringify(body)
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    if (!j.ok) {
+      // PASSが変更された場合は、保存済みのPASSを消して入力画面に戻す
+      if (state.inChat && String(j.error || '').indexOf('PASSが違います') !== -1) {
+        store.set('jc_code', ''); state.code = '';
+        showSetup();
+        $('err').textContent = 'PASSが変更されました。新しいPASSを入力してください。';
+      }
+      throw new Error(j.error || '通信に失敗しました。');
+    }
+    return j;
+  });
+}
+
+/* ---------- 画面の出し分け ---------- */
+function isWide() {
+  try { return window.matchMedia('(min-width: 900px)').matches; } catch (e) { return false; }
+}
+
+function showSetup() {
+  // 設定の変更で開いた時のために、今の値を入れておく
+  $('inName').value = state.name; $('inCode').value = state.code;
+  var cur = state.areas.join(',');
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="area"]'), function (r) { r.checked = (r.value === cur); });
+  $('err').textContent = '';
+  state.inChat = false;
+  $('setup').style.display = 'block';
+  $('rooms').style.display = 'none';
+  $('tabs').style.display = 'none';
+}
+
+function showChat() {
+  state.inChat = true;
+  $('setup').style.display = 'none';
+  $('rooms').style.display = 'flex';
+  $('me').textContent = state.name + '（設定）';
+  $('title').textContent = state.areas.length === 1 ? '巡回チャット（' + state.areas[0] + '）' : '巡回チャット';
+  buildRooms();
+  refresh();
+  updateBanner();
+}
+$('me').addEventListener('click', showSetup);
+
+/* ---------- 部屋（エリア）の組み立てと切り替え ---------- */
+function makeRoom(area) {
+  var el = $('roomTpl').content.firstElementChild.cloneNode(true);
+  var q = function (s) { return el.querySelector(s); };
+  var r = {
+    area: area, el: el, list: q('.list'), ta: q('textarea'), replyBar: q('.replyBar'), mentionBox: q('.mentionBox'),
+    form: q('form.send'), msgs: [], members: [], lastJson: '', readSent: '', sessionStart: true, unreadFromId: '',
+    scrollToDivider: false, replyTo: null, visible: false, first: false
+  };
+  q('.room-name').textContent = area;
+  q('.replyCancel').addEventListener('click', function () { r.replyTo = null; showReplyBar(r); });
+  r.ta.addEventListener('input', function () { resizeTa(r); updateMention(r); });
+  r.ta.addEventListener('click', function () { updateMention(r); });
+  r.ta.addEventListener('keyup', function (ev) { if ((ev.key || '').indexOf('Arrow') === 0) updateMention(r); });
+  q('.at').addEventListener('click', function () {
+    var pos = r.ta.selectionStart;
+    r.ta.value = r.ta.value.slice(0, pos) + '@' + r.ta.value.slice(r.ta.selectionEnd);
+    r.ta.focus(); r.ta.setSelectionRange(pos + 1, pos + 1); updateMention(r);
+  });
+  r.form.addEventListener('submit', function (ev) { ev.preventDefault(); sendMessage(r); });
+  return r;
+}
+
+function resetSession(r) { r.sessionStart = true; r.unreadFromId = ''; r.scrollToDivider = false; }
+// 部屋の表示内容をまっさらにする（表示し直す時・名前やエリアを変えた時）
+function resetRoom(r) {
+  r.lastJson = ''; r.msgs = []; r.members = []; r.readSent = ''; r.first = false;
+  r.list.textContent = ''; r.replyTo = null; showReplyBar(r); hideMention(r);
+  resetSession(r);
+}
+
+function buildRooms() {
+  var box = $('rooms'); box.textContent = ''; rooms = {};
+  state.areas.forEach(function (a) { rooms[a] = makeRoom(a); box.appendChild(rooms[a].el); });
+  applyLayout();
+}
+
+/**
+ * 画面の幅とエリアの数に合わせて、どの部屋を出すかを決める。
+ *   エリア1つ：その部屋だけ（PCでは中央に幅を絞って表示）
+ *   エリア2つ・PC（幅900px以上）：左右に並べて両方表示
+ *   エリア2つ・スマホ：上のタブで切り替え（選んだ部屋だけ表示）
+ * 新しく表示された部屋があれば true を返す（呼び出し側で再読み込みする）
+ */
+function applyLayout() {
+  var multi = state.areas.length > 1, wide = isWide(), split = multi && wide, shown = false;
+  var box = $('rooms');
+  box.classList.toggle('split', split); box.classList.toggle('single', !split);
+  renderTabs();
+  state.areas.forEach(function (a) {
+    var r = rooms[a]; if (!r) return;
+    var vis = !multi || wide || a === state.active;
+    r.el.classList.toggle('hidden', !vis);
+    if (vis && !r.visible) { resetRoom(r); shown = true; }
+    r.visible = vis;
+  });
+  return shown;
+}
+window.addEventListener('resize', function () { if (state.inChat && applyLayout()) refresh(); });
+
+function renderTabs() {
+  var tabs = $('tabs');
+  tabs.textContent = '';
+  if (state.areas.length < 2 || isWide() || !state.inChat) { tabs.style.display = 'none'; return; }
+  tabs.style.display = 'flex';
+  state.areas.forEach(function (a) {
+    var b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', a === state.active ? 'true' : 'false');
+    b.textContent = a;
+    if (state.otherUnread.indexOf(a) !== -1) {
+      var d = document.createElement('span'); d.className = 'dot'; d.textContent = '●';
+      d.setAttribute('aria-label', '未読あり');
+      b.appendChild(d);
+    }
+    b.addEventListener('click', function () { switchArea(a); });
+    tabs.appendChild(b);
+  });
+}
+
+function switchArea(a) {
+  if (a === state.active) return;
+  state.active = a; store.set('jc_area', a);
+  closeReaders(); closeActions();
+  applyLayout();
+  refresh();
+}
+
+$('btnStart').addEventListener('click', function () {
+  var n = $('inName').value.trim(), c = $('inCode').value.trim();
+  var picked = document.querySelector('input[name="area"]:checked');
+  if (!n || !c) { $('err').textContent = '名前とPASSを入力してください。'; return; }
+  if (!picked) { $('err').textContent = '担当エリアを選んでください。'; return; }
+  var areas = parseAreas(picked.value);
+  $('err').textContent = '確認中…';
+  var prev = { name: state.name, code: state.code };
+  state.code = c; state.name = n;
+  api('list', { name: n, area: areas[0] }).then(function () {
+    store.set('jc_name', n); store.set('jc_code', c); store.set('jc_areas', areas.join(','));
+    state.areas = areas; state.otherUnread = [];
+    if (areas.indexOf(state.active) === -1) { state.active = areas[0]; store.set('jc_area', state.active); }
+    $('err').textContent = '';
+    showChat();
+  }).catch(function (e) {
+    state.name = prev.name; state.code = prev.code;
+    $('err').textContent = '入室できませんでした：' + e.message;
+  });
+});
+
+/* ---------- メッセージ表示 ---------- */
+function render(r, messages) {
+  var json = JSON.stringify([messages, r.unreadFromId]);
+  if (json === r.lastJson) return;
+  r.lastJson = json;
+  var box = r.list;
+  var nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  box.textContent = '';
+  if (messages.length === 0) {
+    var em = document.createElement('div'); em.className = 'empty';
+    em.textContent = 'まだメッセージはありません。最初の一言を送ってみましょう。';
+    box.appendChild(em);
+    return;
+  }
+  var unreadLine = null;
+  messages.forEach(function (m) {
+    if (m.id === r.unreadFromId) {
+      unreadLine = document.createElement('div'); unreadLine.className = 'unread-line';
+      unreadLine.setAttribute('role', 'separator'); unreadLine.textContent = 'ここから未読メッセージ';
+      box.appendChild(unreadLine);
+    }
+    var wrap = document.createElement('div');
+    var mentions = m.mentions || [];
+    var toMe = !m.deleted && m.name !== state.name && (mentions.indexOf(state.name) !== -1 || mentions.indexOf('全員') !== -1);
+    wrap.className = 'msg' + (m.name === state.name ? ' mine' : '') + (toMe ? ' tome' : '');
+    wrap.id = 'm-' + m.id;
+    var who = document.createElement('div'); who.className = 'who'; who.textContent = m.name;
+    var b = document.createElement('div'); b.className = 'bubble';
+    if (m.deleted) {
+      b.classList.add('deleted'); b.textContent = 'メッセージの送信が取り消されました';
+    } else {
+      if (m.replyTo) {
+        // 引用は表示だけ。吹き出しのどこをタップしても操作メニューが開く（返信への返信もできる）
+        var q = document.createElement('div'); q.className = 'quote';
+        var qn = document.createElement('b'); qn.textContent = m.replyTo.name;
+        var qt = document.createElement('span'); qt.textContent = m.replyTo.deleted ? '取り消されたメッセージ' : m.replyTo.text;
+        q.appendChild(qn); q.appendChild(qt);
+        b.appendChild(q);
+      }
+      var body = document.createElement('div'); fillText(body, m.text, mentions); b.appendChild(body);
+      b.setAttribute('role', 'button'); b.tabIndex = 0;
+      b.setAttribute('aria-label', m.name + 'のメッセージ。操作を開く');
+      b.addEventListener('click', (function (id) { return function () { openActions(r, id); }; })(m.id));
+      b.addEventListener('keydown', (function (id) { return function (ev) { if (ev.key === 'Enter') openActions(r, id); }; })(m.id));
+    }
+    var at = document.createElement('div'); at.className = 'at'; at.textContent = m.at;
+    var meta = document.createElement('div'); meta.className = 'meta';
+    var n = (m.readBy || []).length;
+    if (m.name === state.name && n > 0 && !m.deleted) {
+      var rb = document.createElement('button'); rb.type = 'button'; rb.className = 'readmark';
+      rb.textContent = '既読 ' + n;
+      rb.setAttribute('aria-label', '既読 ' + n + '人。タップで名前を表示');
+      rb.addEventListener('click', (function (id) { return function () { openReaders(r, id); }; })(m.id));
+      meta.appendChild(rb);
+    }
+    meta.appendChild(at);
+    if (m.name !== state.name) wrap.appendChild(who);
+    wrap.appendChild(b); wrap.appendChild(meta);
+    box.appendChild(wrap);
+  });
+  if (r.scrollToDivider && unreadLine) {
+    // 開いた直後は、未読の線が画面の上のほうに来る位置まで進める（LINEと同じ動き）
+    box.scrollTop = unreadLine.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8;
+    r.scrollToDivider = false; r.first = true;
+  } else if (nearBottom || !r.first) { box.scrollTop = box.scrollHeight; r.first = true; }
+}
+
+/** 本文を表示用に組み立てる。メンション（@名前）は色を付けて強調する（innerHTMLは使わない） */
+function fillText(el, text, mentionNames) {
+  var names = (mentionNames || []).slice().sort(function (a, b) { return b.length - a.length; }); // 長い名前を先に照合
+  if (!names.length) { el.textContent = text; return; }
+  var alt = names.map(function (n) { return n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|');
+  var parts = text.split(new RegExp('(@(?:' + alt + '))')); // 括弧で囲むので、奇数番目が@名前の部分
+  parts.forEach(function (p, i) {
+    if (i % 2 === 1) { var s = document.createElement('span'); s.className = 'mention'; s.textContent = p; el.appendChild(s); }
+    else if (p) el.appendChild(document.createTextNode(p));
+  });
+}
+
+/** 元のメッセージまで移動して一瞬ハイライトする */
+function scrollToMsg(r, id) {
+  var el = r.list.querySelector('[id="m-' + id + '"]'), box = r.list;
+  if (!el) { toast('元のメッセージは、表示している範囲より前にあります'); return; }
+  box.scrollTop = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 12;
+  el.classList.add('flash');
+  setTimeout(function () { el.classList.remove('flash'); }, 1500);
+}
+
+/** 開く前に自分が読んでいた位置より後ろで、最初の「他の人のメッセージ」を返す（初回入室や未読なしは空） */
+function findUnread(messages, myLast) {
+  if (!myLast) return '';
+  var pos = -1, i;
+  for (i = 0; i < messages.length; i++) { if (messages[i].id === myLast) { pos = i; break; } }
+  for (i = pos + 1; i < messages.length; i++) { if (messages[i].name !== state.name && !messages[i].deleted) return messages[i].id; }
+  return '';
+}
+
+/* ---------- 読み込み（5秒ごと）。表示中の部屋だけ ---------- */
+function refresh() {
+  if (!state.inChat || !state.name || !state.code || document.visibilityState !== 'visible') return;
+  state.areas.forEach(function (a) { if (rooms[a] && rooms[a].visible) refreshRoom(rooms[a]); });
+}
+
+function refreshRoom(r) {
+  api('list', { name: state.name, area: r.area, areas: state.areas }).then(function (j) {
+    if (rooms[r.area] !== r || !r.visible) return; // 通信中に部屋が作り直された・隠れた場合は、古い結果を捨てる
+    r.msgs = j.messages;
+    r.members = j.members || [];
+    if (r.area === state.active) { // 他のエリアの未読の印（タブ用）
+      var ou = (j.unreadAreas || []).join(',');
+      if (ou !== state.otherUnread.join(',')) { state.otherUnread = j.unreadAreas || []; renderTabs(); }
+    }
+    // 開いた直後の1回だけ、既読位置（markReadで進める前の値）から未読の線の位置を決める
+    if (r.sessionStart) {
+      r.sessionStart = false;
+      r.unreadFromId = findUnread(j.messages, j.myLast);
+      r.scrollToDivider = !!r.unreadFromId;
+    }
+    render(r, j.messages);
+    markRead(r, j.messages);
+  }).catch(function () {});
+}
+setInterval(refresh, 5000);
+
+/* ---------- 既読 ---------- */
+// 画面を見ている間、最新メッセージまで読んだことをサーバーに1回だけ伝える（新着があった時だけ再送）
+function markRead(r, messages) {
+  if (!messages.length) return;
+  var lastId = messages[messages.length - 1].id;
+  if (r.readSent === lastId) return;
+  r.readSent = lastId;
+  api('read', { name: state.name, area: r.area, lastId: lastId }).catch(function () { r.readSent = ''; });
+}
+
+function findMsg(r, id) {
+  for (var i = 0; i < r.msgs.length; i++) { if (r.msgs[i].id === id) return r.msgs[i]; }
+  return null;
+}
+
+function openReaders(r, id) {
+  var m = findMsg(r, id);
+  if (!m) return;
+  var names = m.readBy || [];
+  $('sheetTitle').textContent = '既読 ' + names.length + '人';
+  $('sheetPreview').textContent = m.text;
+  var ul = $('sheetList'); ul.textContent = '';
+  names.forEach(function (nm) { var li = document.createElement('li'); li.textContent = nm; ul.appendChild(li); });
+  $('sheetBg').style.display = 'flex';
+  $('sheetClose').focus();
+}
+function closeReaders() { $('sheetBg').style.display = 'none'; }
+$('sheetClose').addEventListener('click', closeReaders);
+$('sheetBg').addEventListener('click', function (ev) { if (ev.target === $('sheetBg')) closeReaders(); });
+document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { closeReaders(); closeActions(); } });
+
+/* ---------- メッセージの操作（返信・元へ移動・コピー・取り消し） ---------- */
+var actRoom = null, actMsg = null;
+function openActions(r, id) {
+  var m = findMsg(r, id);
+  if (!m || m.deleted) return;
+  actRoom = r; actMsg = m;
+  $('actPreview').textContent = m.name + '：' + m.text;
+  $('actJump').style.display = m.replyTo ? 'block' : 'none';
+  $('actUnsend').style.display = (m.name === state.name) ? 'block' : 'none'; // 取り消せるのは自分のメッセージだけ
+  $('actBg').style.display = 'flex';
+  $('actReply').focus();
+}
+function closeActions() { $('actBg').style.display = 'none'; actRoom = null; actMsg = null; }
+$('actClose').addEventListener('click', closeActions);
+$('actBg').addEventListener('click', function (ev) { if (ev.target === $('actBg')) closeActions(); });
+
+$('actReply').addEventListener('click', function () {
+  if (!actMsg) return;
+  var r = actRoom;
+  r.replyTo = { id: actMsg.id, name: actMsg.name, text: actMsg.text };
+  closeActions(); showReplyBar(r); r.ta.focus();
+});
+$('actJump').addEventListener('click', function () {
+  if (!actMsg || !actMsg.replyTo) return;
+  var r = actRoom, id = actMsg.replyTo.id;
+  closeActions(); scrollToMsg(r, id);
+});
+$('actCopy').addEventListener('click', function () {
+  var text = actMsg ? actMsg.text : '';
+  closeActions();
+  try {
+    navigator.clipboard.writeText(text).then(function () { toast('コピーしました'); }, function () { toast('コピーできませんでした'); });
+  } catch (e) { toast('コピーできませんでした'); }
+});
+$('actUnsend').addEventListener('click', function () {
+  if (!actMsg) return;
+  var r = actRoom, id = actMsg.id;
+  closeActions();
+  if (!window.confirm('このメッセージの送信を取り消しますか？\n全員の画面で「取り消されました」に変わります。\n（すでに届いた通知は消えません）')) return;
+  api('unsend', { name: state.name, area: r.area, id: id }).then(function () {
+    toast('送信を取り消しました');
+    refresh();
+  }).catch(function (e) { toast('取り消せませんでした：' + e.message); });
+});
+
+function showReplyBar(r) {
+  var rt = r.replyTo;
+  r.replyBar.style.display = rt ? 'flex' : 'none';
+  if (rt) {
+    r.replyBar.querySelector('.replyWho').textContent = rt.name + ' に返信';
+    r.replyBar.querySelector('.replyText').textContent = rt.text;
+  }
+}
+
+/* ---------- 送信・メンション ---------- */
+function resizeTa(r) { r.ta.style.height = 'auto'; r.ta.style.height = Math.min(r.ta.scrollHeight, 120) + 'px'; }
+
+function hideMention(r) { r.mentionBox.style.display = 'none'; }
+// 入力中のカーソル直前が「@○○」なら、名前の候補（@全員を含む）を出す
+function updateMention(r) {
+  var ta = r.ta, pos = ta.selectionStart, before = ta.value.slice(0, pos);
+  var m = /@([^\s@]*)$/.exec(before);
+  if (!m) { hideMention(r); return; }
+  var q = m[1];
+  var names = ['全員'].concat(r.members.filter(function (n) { return n !== state.name; }))
+    .filter(function (n) { return n.indexOf(q) !== -1; }).slice(0, 8);
+  if (!names.length) { hideMention(r); return; }
+  var box = r.mentionBox; box.textContent = '';
+  names.forEach(function (n) {
+    var b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'option');
+    b.textContent = '@' + n;
+    b.addEventListener('click', function () { insertMention(r, n, m.index, pos); });
+    box.appendChild(b);
+  });
+  box.style.display = 'block';
+}
+function insertMention(r, name, start, end) {
+  var ta = r.ta;
+  ta.value = ta.value.slice(0, start) + '@' + name + ' ' + ta.value.slice(end);
+  var p = start + name.length + 2;
+  hideMention(r); resizeTa(r); ta.focus(); ta.setSelectionRange(p, p);
+}
+
+/** 本文中の「@名前」から、メンション先の名前の一覧を作る（長い名前を先に照合して、@松井 と @松井太郎 を取り違えない） */
+function collectMentions(r, text) {
+  var names = ['全員'].concat(r.members).filter(function (n) { return n !== state.name; })
+    .sort(function (a, b) { return b.length - a.length; });
+  var t = text, out = [];
+  names.forEach(function (n) {
+    if (t.indexOf('@' + n) !== -1) { out.push(n); t = t.split('@' + n).join(' '); }
+  });
+  return out;
+}
+
+function sendMessage(r) {
+  var text = r.ta.value.trim();
+  if (!text) return;
+  var btn = r.form.querySelector('.btnSend');
+  btn.disabled = true;
+  api('send', {
+    name: state.name, text: text, token: state.token, area: r.area,
+    replyTo: r.replyTo ? r.replyTo.id : '', mentions: collectMentions(r, text)
+  }).then(function () {
+    r.ta.value = ''; r.ta.style.height = 'auto';
+    r.replyTo = null; showReplyBar(r); hideMention(r);
+    refresh();
+  }).catch(function (e) {
+    toast('送信できませんでした：' + e.message);
+  }).then(function () { btn.disabled = false; });
+}
+
+/* ---------- 通知 ---------- */
+function isStandalone() {
+  return window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+}
+
+function updateBanner() {
+  var b = $('banner');
+  b.style.display = 'none'; b.textContent = '';
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+    if (!isStandalone()) {
+      b.textContent = '通知を受け取るには、Safariの共有ボタンから「ホーム画面に追加」して、追加したアイコンから開いてください。';
+      b.style.display = 'block';
+    }
+    return;
+  }
+  if (Notification.permission === 'granted') { enablePush(true); return; }
+  if (Notification.permission === 'denied') {
+    b.textContent = '通知がオフになっています。iPhoneの「設定」→「通知」→「巡回チャット」でオンにしてください。';
+    b.style.display = 'block';
+    return;
+  }
+  b.textContent = '新着メッセージを通知で受け取れます。';
+  b.appendChild(document.createElement('br'));
+  var btn = document.createElement('button'); btn.type = 'button'; btn.textContent = '通知をオンにする';
+  btn.addEventListener('click', function () { enablePush(false); });
+  b.appendChild(btn);
+  b.style.display = 'block';
+}
+
+function enablePush(silent) {
+  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG); // 設定変更で複数回呼ばれても二重初期化しない
+  var messaging = firebase.messaging();
+  var p = (Notification.permission === 'granted') ? Promise.resolve('granted') : Notification.requestPermission();
+  return p.then(function (perm) {
+    if (perm !== 'granted') { updateBanner(); return; }
+    return navigator.serviceWorker.register('firebase-messaging-sw.js').then(function (reg) {
+      return navigator.serviceWorker.ready.then(function () {
+        return messaging.getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+      });
+    }).then(function (token) {
+      if (!token) throw new Error('通知トークンを取得できませんでした。');
+      state.token = token; store.set('jc_token', token);
+      return api('register', { name: state.name, token: token, areas: state.areas });
+    }).then(function () {
+      $('banner').style.display = 'none';
+      if (!silent) toast('通知をオンにしました');
+    });
+  }).catch(function (e) {
+    var b = $('banner');
+    b.textContent = '通知の設定に失敗しました：' + e.message + '（ホーム画面に追加したアイコンから開いているか確認してください）';
+    b.style.display = 'block';
+  });
+}
+
+/* ---------- バッジ・通知のクリア ---------- */
+function clearBadge() {
+  try { if (navigator.clearAppBadge) navigator.clearAppBadge(); } catch (e) {}
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistration().then(function (reg) {
+      if (!reg) return;
+      reg.getNotifications().then(function (list) { list.forEach(function (n) { n.close(); }); });
+    }).catch(function () {});
+  }
+}
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') { clearBadge(); refresh(); }
+  else { state.areas.forEach(function (a) { if (rooms[a]) resetSession(rooms[a]); }); } // 閉じたら線は消え、次に開いた時に引き直す
+});
+
+/* ---------- 起動 ---------- */
+// エリア機能の追加前から使っている端末は、エリア未設定なので設定画面から始める
+if (state.name && state.code && state.areas.length) { showChat(); clearBadge(); } else { showSetup(); }
+</script>
+</body>
+</html>
