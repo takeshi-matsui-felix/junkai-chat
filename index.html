@@ -91,6 +91,29 @@
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 76px);
     background: #222; color: #fff; padding: 8px 14px; border-radius: 16px; font-size: 13px; display: none;
   }
+  .msg .meta { display: flex; align-items: center; gap: 8px; margin: 2px 4px 0; }
+  .msg.mine .meta { justify-content: flex-end; }
+  .msg .meta .at { margin: 0; }
+  .readmark {
+    border: 0; background: none; padding: 4px 2px; margin: -4px 0;
+    font-size: 11px; font-weight: 700; color: var(--navy); font-family: inherit; text-decoration: underline;
+  }
+  #sheetBg {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 10;
+    align-items: flex-end; justify-content: center;
+  }
+  #sheet {
+    background: #fff; width: 100%; max-width: 520px; max-height: 60%; overflow-y: auto;
+    border-radius: 16px 16px 0 0; padding: 18px 20px calc(env(safe-area-inset-bottom, 0px) + 18px);
+  }
+  #sheet h3 { margin: 0 0 4px; font-size: 16px; }
+  #sheet .preview { font-size: 12px; color: var(--sub); margin: 0 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #sheet ul { list-style: none; margin: 0; padding: 0; }
+  #sheet li { padding: 10px 2px; border-top: 1px solid #E3E8EE; font-size: 15px; }
+  #sheet button {
+    margin-top: 14px; width: 100%; font-size: 15px; font-weight: 700; padding: 12px;
+    border: 0; border-radius: 10px; background: var(--navy); color: #fff;
+  }
 </style>
 </head>
 <body>
@@ -120,6 +143,14 @@
     <button id="btnSend" type="submit">送信</button>
   </form>
 </div>
+<div id="sheetBg">
+  <div id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <h3 id="sheetTitle"></h3>
+    <p class="preview" id="sheetPreview"></p>
+    <ul id="sheetList"></ul>
+    <button id="sheetClose" type="button">閉じる</button>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
@@ -143,7 +174,7 @@ var store = {
   get: function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
   set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 };
-var state = { name: store.get('jc_name'), code: store.get('jc_code'), token: store.get('jc_token'), lastJson: '' };
+var state = { name: store.get('jc_name'), code: store.get('jc_code'), token: store.get('jc_token'), lastJson: '', msgs: [], readSent: '' };
 
 function toast(msg) {
   var t = $('toast'); t.textContent = msg; t.style.display = 'block';
@@ -211,8 +242,18 @@ function render(messages) {
     var who = document.createElement('div'); who.className = 'who'; who.textContent = m.name;
     var b = document.createElement('div'); b.className = 'bubble'; b.textContent = m.text;
     var at = document.createElement('div'); at.className = 'at'; at.textContent = m.at;
+    var meta = document.createElement('div'); meta.className = 'meta';
+    var n = (m.readBy || []).length;
+    if (m.name === state.name && n > 0) {
+      var rb = document.createElement('button'); rb.type = 'button'; rb.className = 'readmark';
+      rb.textContent = '既読 ' + n;
+      rb.setAttribute('aria-label', '既読 ' + n + '人。タップで名前を表示');
+      rb.addEventListener('click', (function (id) { return function () { openReaders(id); }; })(m.id));
+      meta.appendChild(rb);
+    }
+    meta.appendChild(at);
     if (m.name !== state.name) wrap.appendChild(who);
-    wrap.appendChild(b); wrap.appendChild(at);
+    wrap.appendChild(b); wrap.appendChild(meta);
     box.appendChild(wrap);
   });
   if (nearBottom || box.dataset.first !== '1') { box.scrollTop = box.scrollHeight; box.dataset.first = '1'; }
@@ -220,8 +261,35 @@ function render(messages) {
 
 function refresh() {
   if (!state.name || !state.code || document.visibilityState !== 'visible') return;
-  api('list').then(function (j) { render(j.messages); }).catch(function () {});
+  api('list').then(function (j) { state.msgs = j.messages; render(j.messages); markRead(j.messages); }).catch(function () {});
 }
+
+/* ---------- 既読 ---------- */
+// 画面を見ている間、最新メッセージまで読んだことをサーバーに1回だけ伝える（新着があった時だけ再送）
+function markRead(messages) {
+  if (!messages.length) return;
+  var lastId = messages[messages.length - 1].id;
+  if (state.readSent === lastId) return;
+  state.readSent = lastId;
+  api('read', { name: state.name, lastId: lastId }).catch(function () { state.readSent = ''; });
+}
+
+function openReaders(id) {
+  var m = null;
+  for (var i = 0; i < state.msgs.length; i++) { if (state.msgs[i].id === id) { m = state.msgs[i]; break; } }
+  if (!m) return;
+  var names = m.readBy || [];
+  $('sheetTitle').textContent = '既読 ' + names.length + '人';
+  $('sheetPreview').textContent = m.text;
+  var ul = $('sheetList'); ul.textContent = '';
+  names.forEach(function (nm) { var li = document.createElement('li'); li.textContent = nm; ul.appendChild(li); });
+  $('sheetBg').style.display = 'flex';
+  $('sheetClose').focus();
+}
+function closeReaders() { $('sheetBg').style.display = 'none'; }
+$('sheetClose').addEventListener('click', closeReaders);
+$('sheetBg').addEventListener('click', function (ev) { if (ev.target === $('sheetBg')) closeReaders(); });
+document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeReaders(); });
 setInterval(refresh, 5000);
 
 /* ---------- 送信 ---------- */
