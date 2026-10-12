@@ -169,6 +169,18 @@
   .quote b { display: block; font-size: 11px; }
   .msg.mine .quote { border-left-color: rgba(255,255,255,.65); }
   .mention { font-weight: 700; color: #B54300; }
+  .cd { white-space: pre-wrap; }
+  .cd.head { font-weight: 700; margin-bottom: 4px; }
+  .cd.head.alert { color: #D32F2F; }
+  .cd.head.ok { color: #2E7D32; }
+  .cd.label { font-size: 12px; font-weight: 700; margin-top: 6px; }
+  .cd.red, .cd.label.red { color: #D32F2F; }
+  .cd.blue, .cd.label.blue { color: #1565C0; }
+  .cd.red, .cd.blue { font-weight: 700; font-size: 1.05em; }
+  .cd-hr { border-top: 1px solid #cfd6e0; margin: 8px 0; }
+  .cd.photo a { font-size: 14px; }
+  .cd.btn { margin-top: 8px; text-align: center; border-top: 1px solid #e3e8ef; padding-top: 8px; }
+  .cd.btn a { text-decoration: none; font-weight: 700; }
   .bubble a { color: #0B63C5; text-decoration: underline; word-break: break-all; }
   .msg.mine .bubble a { color: #fff; }
   .msg.mine .mention { color: #FFD2B3; }
@@ -490,7 +502,9 @@ function render(r, messages) {
         q.appendChild(qn); q.appendChild(qt);
         b.appendChild(q);
       }
-      var body = document.createElement('div'); fillText(body, m.text, mentions); b.appendChild(body);
+      var body = document.createElement('div');
+      if (m.name === SYSTEM_NAME) renderCard(body, m.text); else fillText(body, m.text, mentions);
+      b.appendChild(body);
       b.setAttribute('role', 'button'); b.tabIndex = 0;
       b.setAttribute('aria-label', m.name + 'のメッセージ。操作を開く');
       b.addEventListener('click', (function (id) { return function () { openActions(r, id); }; })(m.id));
@@ -529,6 +543,29 @@ function fillText(el, text, mentionNames) {
   parts.forEach(function (p, i) {
     if (names.length && i % 2 === 1) { var s = document.createElement('span'); s.className = 'mention'; s.textContent = p; el.appendChild(s); }
     else if (p) linkify(el, p);
+  });
+}
+
+/** 巡回管理システムからのカード（指令の発令・完了）を、LINEのときと同じ色分けで表示する。本文の文字列だけから組み立てる */
+var SYSTEM_NAME = '巡回管理システム';
+function renderCard(el, text) {
+  var lines = String(text).split('\n'), mode = '', photo = 0;
+  function add(cls, t) { var d = document.createElement('div'); d.className = 'cd ' + cls; if (t === '') d.innerHTML = '&nbsp;'; else d.textContent = t; el.appendChild(d); return d; }
+  function link(label, url, cls) {
+    var a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    a.textContent = label; a.addEventListener('click', function (ev) { ev.stopPropagation(); });
+    var d = document.createElement('div'); d.className = 'cd ' + cls; d.appendChild(a); el.appendChild(d);
+  }
+  lines.forEach(function (ln, i) {
+    var m;
+    if (i === 0) { add('head ' + (ln.indexOf('✅') === 0 ? 'ok' : 'alert'), ln); return; }
+    if (/^[―\-─]{4,}$/.test(ln)) { var hr = document.createElement('div'); hr.className = 'cd-hr'; el.appendChild(hr); return; }
+    if (ln === '【内容】') { mode = 'red'; add('label red', '内容'); return; }
+    if (ln === '【コメント】') { mode = 'blue'; add('label blue', 'コメント'); return; }
+    if (/^(対応者: |写真: )/.test(ln) || ln.indexOf('▶') === 0) { if (!/^対応者: /.test(ln) || mode === 'red') mode = ''; }
+    if ((m = ln.match(/^▶(.+?)\s+(https?:\/\/[A-Za-z0-9\-._~:\/?#\[\]@!$&'()*+,;=%]+)$/))) { link(m[1], m[2], 'btn'); return; }
+    if ((m = ln.match(/^https?:\/\/[A-Za-z0-9\-._~:\/?#\[\]@!$&'()*+,;=%]+$/))) { photo++; link('📷 写真' + photo + 'を開く', ln, 'photo'); return; }
+    add(mode, ln);
   });
 }
 
