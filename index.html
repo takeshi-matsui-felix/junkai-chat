@@ -38,7 +38,17 @@
     display: flex; align-items: center; justify-content: space-between;
   }
   header h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: .02em; }
-  header .me { font-size: 12px; opacity: .8; }
+  header .me {
+    font-size: 12px; opacity: .85; background: none; border: 0; color: #fff; font-family: inherit;
+    padding: 8px 0 8px 12px; text-decoration: underline;
+  }
+  #tabs { display: flex; background: var(--navy-dark); }
+  #tabs button {
+    flex: 1; border: 0; background: none; color: #B8C6D8; font-family: inherit; font-size: 15px; font-weight: 700;
+    padding: 11px 8px; border-bottom: 3px solid transparent;
+  }
+  #tabs button[aria-selected="true"] { color: #fff; border-bottom-color: #fff; }
+  #tabs .dot { color: #FF8A4C; font-size: 12px; margin-left: 4px; }
   #banner {
     background: #FFF3E0; color: #7A3E00; font-size: 13px; line-height: 1.6;
     padding: 10px 16px; display: none; border-bottom: 1px solid #F2D4A8;
@@ -86,11 +96,21 @@
     margin-top: 22px; width: 100%; font-size: 16px; font-weight: 700; padding: 14px;
     border: 0; border-radius: 10px; background: var(--navy); color: #fff;
   }
+  #setup .opt {
+    display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 400; margin: 8px 0 0;
+    padding: 12px; border: 1px solid #C7CFDA; border-radius: 10px; background: #fff;
+  }
+  #setup .opt input { width: 20px; height: 20px; margin: 0; padding: 0; }
   #err { color: #C62828; font-size: 13px; margin-top: 12px; min-height: 18px; }
   #toast {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 76px);
     background: #222; color: #fff; padding: 8px 14px; border-radius: 16px; font-size: 13px; display: none;
   }
+  .unread-line {
+    display: flex; align-items: center; gap: 10px; margin: 6px 0 14px;
+    font-size: 12px; font-weight: 700; color: #4A5B70;
+  }
+  .unread-line::before, .unread-line::after { content: ''; flex: 1; height: 1px; background: #B4C0CE; }
   .msg .meta { display: flex; align-items: center; gap: 8px; margin: 2px 4px 0; }
   .msg.mine .meta { justify-content: flex-end; }
   .msg .meta .at { margin: 0; }
@@ -119,9 +139,10 @@
 <body>
 <div id="app">
   <header>
-    <h1>巡回チャット</h1>
-    <span class="me" id="me"></span>
+    <h1 id="title">巡回チャット</h1>
+    <button class="me" id="me" type="button" aria-label="名前とエリアの設定を変更"></button>
   </header>
+  <div id="tabs" role="tablist" aria-label="エリア切り替え" style="display:none"></div>
 
   <div id="banner"></div>
 
@@ -132,6 +153,12 @@
     <input id="inName" autocomplete="off" placeholder="例：松井">
     <label for="inCode">合言葉</label>
     <input id="inCode" type="password" autocomplete="off" placeholder="管理者から聞いた合言葉">
+    <label id="areaLabel">担当エリア</label>
+    <div role="radiogroup" aria-labelledby="areaLabel">
+      <label class="opt"><input type="radio" name="area" value="東海">東海</label>
+      <label class="opt"><input type="radio" name="area" value="関東">関東</label>
+      <label class="opt"><input type="radio" name="area" value="東海,関東">両方（本部など。画面上部で切り替えられます）</label>
+    </div>
     <button id="btnStart" type="button">チャットを始める</button>
     <div id="err"></div>
   </section>
@@ -174,7 +201,14 @@ var store = {
   get: function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
   set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 };
-var state = { name: store.get('jc_name'), code: store.get('jc_code'), token: store.get('jc_token'), lastJson: '', msgs: [], readSent: '' };
+var AREAS = ['東海', '関東'];
+function parseAreas(s) { return String(s || '').split(',').filter(function (a) { return AREAS.indexOf(a) !== -1; }); }
+var state = {
+  name: store.get('jc_name'), code: store.get('jc_code'), token: store.get('jc_token'),
+  areas: parseAreas(store.get('jc_areas')), area: '', otherUnread: [],
+  lastJson: '', msgs: [], readSent: '', sessionStart: true, unreadFromId: '', scrollToDivider: false
+};
+state.area = state.areas.indexOf(store.get('jc_area')) !== -1 ? store.get('jc_area') : (state.areas[0] || '');
 
 function toast(msg) {
   var t = $('toast'); t.textContent = msg; t.style.display = 'block';
@@ -195,36 +229,89 @@ function api(action, payload) {
 
 /* ---------- 画面切り替え ---------- */
 function showSetup() {
+  // 設定の変更で開いた時のために、今の値を入れておく
+  $('inName').value = state.name; $('inCode').value = state.code;
+  var cur = state.areas.join(',');
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="area"]'), function (r) { r.checked = (r.value === cur); });
+  $('err').textContent = '';
   $('setup').style.display = 'block';
   $('list').style.display = 'none';
   $('send').style.display = 'none';
+  $('tabs').style.display = 'none';
 }
 function showChat() {
   $('setup').style.display = 'none';
   $('list').style.display = 'block';
   $('send').style.display = 'flex';
-  $('me').textContent = state.name;
+  $('me').textContent = state.name + '（設定）';
+  $('title').textContent = state.areas.length === 1 ? '巡回チャット（' + state.area + '）' : '巡回チャット';
+  renderTabs();
   refresh(true);
   updateBanner();
+}
+$('me').addEventListener('click', showSetup);
+
+/* ---------- エリア（部屋）の切り替え ---------- */
+function renderTabs() {
+  var tabs = $('tabs');
+  tabs.textContent = '';
+  if (state.areas.length < 2) { tabs.style.display = 'none'; return; }
+  tabs.style.display = 'flex';
+  state.areas.forEach(function (a) {
+    var b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', a === state.area ? 'true' : 'false');
+    b.textContent = a;
+    if (state.otherUnread.indexOf(a) !== -1) {
+      var d = document.createElement('span'); d.className = 'dot'; d.textContent = '●';
+      d.setAttribute('aria-label', '未読あり');
+      b.appendChild(d);
+    }
+    b.addEventListener('click', function () { switchArea(a); });
+    tabs.appendChild(b);
+  });
+}
+
+function switchArea(a) {
+  if (a === state.area) return;
+  state.area = a; store.set('jc_area', a);
+  state.lastJson = ''; state.msgs = []; state.readSent = '';
+  state.sessionStart = true; state.unreadFromId = ''; state.scrollToDivider = false;
+  var box = $('list'); box.textContent = ''; delete box.dataset.first;
+  closeReaders();
+  renderTabs();
+  refresh();
 }
 
 $('btnStart').addEventListener('click', function () {
   var n = $('inName').value.trim(), c = $('inCode').value.trim();
+  var picked = document.querySelector('input[name="area"]:checked');
   if (!n || !c) { $('err').textContent = '名前と合言葉を入力してください。'; return; }
+  if (!picked) { $('err').textContent = '担当エリアを選んでください。'; return; }
+  var areas = parseAreas(picked.value);
   $('err').textContent = '確認中…';
+  var prev = { name: state.name, code: state.code };
   state.code = c; state.name = n;
-  api('list').then(function () {
-    store.set('jc_name', n); store.set('jc_code', c);
+  api('list', { name: n, area: areas[0] }).then(function () {
+    store.set('jc_name', n); store.set('jc_code', c); store.set('jc_areas', areas.join(','));
+    var changed = (areas.join(',') !== state.areas.join(',')) || n !== prev.name;
+    state.areas = areas;
+    if (areas.indexOf(state.area) === -1) { state.area = areas[0]; store.set('jc_area', state.area); }
+    if (changed) { // 名前やエリアが変わったら、表示と既読の状態を作り直す
+      state.lastJson = ''; state.msgs = []; state.readSent = ''; state.otherUnread = [];
+      state.sessionStart = true; state.unreadFromId = ''; state.scrollToDivider = false;
+      var box = $('list'); box.textContent = ''; delete box.dataset.first;
+    }
     $('err').textContent = '';
     showChat();
   }).catch(function (e) {
+    state.name = prev.name; state.code = prev.code;
     $('err').textContent = '入室できませんでした：' + e.message;
   });
 });
 
 /* ---------- メッセージ表示 ---------- */
 function render(messages) {
-  var json = JSON.stringify(messages);
+  var json = JSON.stringify([messages, state.unreadFromId]);
   if (json === state.lastJson) return;
   state.lastJson = json;
   var box = $('list');
@@ -237,6 +324,11 @@ function render(messages) {
     return;
   }
   messages.forEach(function (m) {
+    if (m.id === state.unreadFromId) {
+      var line = document.createElement('div'); line.className = 'unread-line'; line.id = 'unreadLine';
+      line.setAttribute('role', 'separator'); line.textContent = 'ここから未読メッセージ';
+      box.appendChild(line);
+    }
     var wrap = document.createElement('div');
     wrap.className = 'msg' + (m.name === state.name ? ' mine' : '');
     var who = document.createElement('div'); who.className = 'who'; who.textContent = m.name;
@@ -256,12 +348,40 @@ function render(messages) {
     wrap.appendChild(b); wrap.appendChild(meta);
     box.appendChild(wrap);
   });
-  if (nearBottom || box.dataset.first !== '1') { box.scrollTop = box.scrollHeight; box.dataset.first = '1'; }
+  var ul = $('unreadLine');
+  if (state.scrollToDivider && ul) {
+    // 開いた直後は、未読の線が画面の上のほうに来る位置まで進める（LINEと同じ動き）
+    box.scrollTop = ul.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8;
+    state.scrollToDivider = false; box.dataset.first = '1';
+  } else if (nearBottom || box.dataset.first !== '1') { box.scrollTop = box.scrollHeight; box.dataset.first = '1'; }
+}
+
+/** 開く前に自分が読んでいた位置より後ろで、最初の「他の人のメッセージ」を返す（初回入室や未読なしは空） */
+function findUnread(messages, myLast) {
+  if (!myLast) return '';
+  var pos = -1, i;
+  for (i = 0; i < messages.length; i++) { if (messages[i].id === myLast) { pos = i; break; } }
+  for (i = pos + 1; i < messages.length; i++) { if (messages[i].name !== state.name) return messages[i].id; }
+  return '';
 }
 
 function refresh() {
   if (!state.name || !state.code || document.visibilityState !== 'visible') return;
-  api('list').then(function (j) { state.msgs = j.messages; render(j.messages); markRead(j.messages); }).catch(function () {});
+  var area = state.area;
+  api('list', { name: state.name, area: area, areas: state.areas }).then(function (j) {
+    if (area !== state.area) return; // 通信中に部屋を切り替えた場合は、古い部屋の結果を捨てる
+    state.msgs = j.messages;
+    var ou = (j.unreadAreas || []).join(',');
+    if (ou !== state.otherUnread.join(',')) { state.otherUnread = j.unreadAreas || []; renderTabs(); }
+    // 開いた直後の1回だけ、既読位置（markReadで進める前の値）から未読の線の位置を決める
+    if (state.sessionStart) {
+      state.sessionStart = false;
+      state.unreadFromId = findUnread(j.messages, j.myLast);
+      state.scrollToDivider = !!state.unreadFromId;
+    }
+    render(j.messages);
+    markRead(j.messages);
+  }).catch(function () {});
 }
 
 /* ---------- 既読 ---------- */
@@ -271,7 +391,7 @@ function markRead(messages) {
   var lastId = messages[messages.length - 1].id;
   if (state.readSent === lastId) return;
   state.readSent = lastId;
-  api('read', { name: state.name, lastId: lastId }).catch(function () { state.readSent = ''; });
+  api('read', { name: state.name, area: state.area, lastId: lastId }).catch(function () { state.readSent = ''; });
 }
 
 function openReaders(id) {
@@ -302,7 +422,7 @@ $('send').addEventListener('submit', function (ev) {
   var text = ta.value.trim();
   if (!text) return;
   $('btnSend').disabled = true;
-  api('send', { name: state.name, text: text, token: state.token }).then(function () {
+  api('send', { name: state.name, text: text, token: state.token, area: state.area }).then(function () {
     ta.value = ''; ta.style.height = 'auto';
     refresh();
   }).catch(function (e) {
@@ -340,7 +460,7 @@ function updateBanner() {
 }
 
 function enablePush(silent) {
-  firebase.initializeApp(FIREBASE_CONFIG);
+  if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG); // 設定変更で複数回呼ばれても二重初期化しない
   var messaging = firebase.messaging();
   var p = (Notification.permission === 'granted') ? Promise.resolve('granted') : Notification.requestPermission();
   return p.then(function (perm) {
@@ -352,7 +472,7 @@ function enablePush(silent) {
     }).then(function (token) {
       if (!token) throw new Error('通知トークンを取得できませんでした。');
       state.token = token; store.set('jc_token', token);
-      return api('register', { name: state.name, token: token });
+      return api('register', { name: state.name, token: token, areas: state.areas });
     }).then(function () {
       $('banner').style.display = 'none';
       if (!silent) toast('通知をオンにしました');
@@ -376,10 +496,12 @@ function clearBadge() {
 }
 document.addEventListener('visibilitychange', function () {
   if (document.visibilityState === 'visible') { clearBadge(); refresh(); }
+  else { state.sessionStart = true; state.unreadFromId = ''; } // 閉じたら線は消え、次に開いた時に引き直す
 });
 
 /* ---------- 起動 ---------- */
-if (state.name && state.code) { showChat(); clearBadge(); } else { showSetup(); }
+// エリア機能の追加前から使っている端末は、エリア未設定なので設定画面から始める
+if (state.name && state.code && state.areas.length) { showChat(); clearBadge(); } else { showSetup(); }
 </script>
 </body>
 </html>
