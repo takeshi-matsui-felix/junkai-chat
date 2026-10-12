@@ -118,22 +118,53 @@
     border: 0; background: none; padding: 4px 2px; margin: -4px 0;
     font-size: 11px; font-weight: 700; color: var(--navy); font-family: inherit; text-decoration: underline;
   }
-  #sheetBg {
+  #sheetBg, #actBg {
     display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 10;
     align-items: flex-end; justify-content: center;
   }
-  #sheet {
+  #sheet, #act {
     background: #fff; width: 100%; max-width: 520px; max-height: 60%; overflow-y: auto;
     border-radius: 16px 16px 0 0; padding: 18px 20px calc(env(safe-area-inset-bottom, 0px) + 18px);
   }
   #sheet h3 { margin: 0 0 4px; font-size: 16px; }
-  #sheet .preview { font-size: 12px; color: var(--sub); margin: 0 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #sheet .preview, #act .preview { font-size: 12px; color: var(--sub); margin: 0 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #sheet ul { list-style: none; margin: 0; padding: 0; }
   #sheet li { padding: 10px 2px; border-top: 1px solid #E3E8EE; font-size: 15px; }
-  #sheet button {
-    margin-top: 14px; width: 100%; font-size: 15px; font-weight: 700; padding: 12px;
-    border: 0; border-radius: 10px; background: var(--navy); color: #fff;
+  #sheet button, #act button {
+    margin-top: 10px; width: 100%; font-size: 15px; font-weight: 700; padding: 12px;
+    border: 0; border-radius: 10px; background: var(--navy); color: #fff; font-family: inherit;
   }
+  #act button.danger { background: #C62828; }
+  #act button.ghost { background: #E3E8EE; color: var(--text); }
+
+  /* 取り消し・返信・メンション */
+  .msg .bubble.deleted, .msg.mine .bubble.deleted {
+    background: transparent; border: 1px dashed #B4C0CE; color: var(--sub); font-size: 13px;
+  }
+  .msg .bubble[role="button"] { cursor: pointer; }
+  .quote {
+    border-left: 3px solid rgba(110,125,145,.7); padding: 2px 8px; margin: 0 0 6px; font-size: 12px; opacity: .9; cursor: pointer;
+  }
+  .quote b { display: block; font-size: 11px; }
+  .msg.mine .quote { border-left-color: rgba(255,255,255,.65); }
+  .mention { font-weight: 700; color: #B54300; }
+  .msg.mine .mention { color: #FFD2B3; }
+  .msg.tome .bubble { box-shadow: 0 0 0 2px var(--alert); }
+  .msg.flash .bubble { outline: 3px solid #7FB0F0; }
+  #replyBar {
+    display: none; align-items: center; gap: 8px; padding: 8px 12px; background: #F3F6FA;
+    border-top: 1px solid #D5DBE3; font-size: 13px;
+  }
+  #replyBar .rt { flex: 1; min-width: 0; }
+  #replyWho { font-weight: 700; font-size: 12px; color: var(--navy); }
+  #replyText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sub); }
+  #replyCancel { border: 0; background: none; font-size: 22px; padding: 4px 10px; color: var(--sub); }
+  #mentionBox { display: none; max-height: 176px; overflow-y: auto; background: #fff; border-top: 1px solid #D5DBE3; }
+  #mentionBox button {
+    display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #EEF1F5; background: none;
+    font-size: 16px; font-family: inherit; padding: 12px 16px; color: var(--text);
+  }
+  form#send button.at { background: #E3E8EE; color: var(--navy); padding: 0; width: 40px; flex: none; font-size: 18px; }
 </style>
 </head>
 <body>
@@ -165,10 +196,26 @@
 
   <main id="list" style="display:none"></main>
 
+  <div id="replyBar">
+    <div class="rt"><div id="replyWho"></div><div id="replyText"></div></div>
+    <button id="replyCancel" type="button" aria-label="返信をやめる">×</button>
+  </div>
+  <div id="mentionBox" role="listbox" aria-label="メンションする人"></div>
+
   <form id="send" style="display:none">
+    <button class="at" id="btnAt" type="button" aria-label="メンション（@）を入れる">＠</button>
     <textarea id="text" rows="1" placeholder="メッセージを入力"></textarea>
     <button id="btnSend" type="submit">送信</button>
   </form>
+</div>
+<div id="actBg">
+  <div id="act" role="dialog" aria-modal="true" aria-label="メッセージの操作">
+    <p class="preview" id="actPreview"></p>
+    <button id="actReply" type="button">返信する</button>
+    <button id="actCopy" type="button">コピー</button>
+    <button id="actUnsend" class="danger" type="button">送信を取り消す</button>
+    <button id="actClose" class="ghost" type="button">閉じる</button>
+  </div>
 </div>
 <div id="sheetBg">
   <div id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
@@ -205,7 +252,7 @@ var AREAS = ['東海', '関東'];
 function parseAreas(s) { return String(s || '').split(',').filter(function (a) { return AREAS.indexOf(a) !== -1; }); }
 var state = {
   name: store.get('jc_name'), code: store.get('jc_code'), token: store.get('jc_token'),
-  areas: parseAreas(store.get('jc_areas')), area: '', otherUnread: [],
+  areas: parseAreas(store.get('jc_areas')), area: '', otherUnread: [], members: [], replyTo: null,
   lastJson: '', msgs: [], readSent: '', sessionStart: true, unreadFromId: '', scrollToDivider: false
 };
 state.area = state.areas.indexOf(store.get('jc_area')) !== -1 ? store.get('jc_area') : (state.areas[0] || '');
@@ -276,8 +323,9 @@ function switchArea(a) {
   state.area = a; store.set('jc_area', a);
   state.lastJson = ''; state.msgs = []; state.readSent = '';
   state.sessionStart = true; state.unreadFromId = ''; state.scrollToDivider = false;
+  state.members = []; state.replyTo = null; showReplyBar(); hideMention();
   var box = $('list'); box.textContent = ''; delete box.dataset.first;
-  closeReaders();
+  closeReaders(); closeActions();
   renderTabs();
   refresh();
 }
@@ -330,13 +378,33 @@ function render(messages) {
       box.appendChild(line);
     }
     var wrap = document.createElement('div');
-    wrap.className = 'msg' + (m.name === state.name ? ' mine' : '');
+    var mentions = m.mentions || [];
+    var toMe = !m.deleted && m.name !== state.name && (mentions.indexOf(state.name) !== -1 || mentions.indexOf('全員') !== -1);
+    wrap.className = 'msg' + (m.name === state.name ? ' mine' : '') + (toMe ? ' tome' : '');
+    wrap.id = 'm-' + m.id;
     var who = document.createElement('div'); who.className = 'who'; who.textContent = m.name;
-    var b = document.createElement('div'); b.className = 'bubble'; b.textContent = m.text;
+    var b = document.createElement('div'); b.className = 'bubble';
+    if (m.deleted) {
+      b.classList.add('deleted'); b.textContent = 'メッセージの送信が取り消されました';
+    } else {
+      if (m.replyTo) {
+        var q = document.createElement('div'); q.className = 'quote';
+        var qn = document.createElement('b'); qn.textContent = m.replyTo.name;
+        var qt = document.createElement('span'); qt.textContent = m.replyTo.deleted ? '取り消されたメッセージ' : m.replyTo.text;
+        q.appendChild(qn); q.appendChild(qt);
+        q.addEventListener('click', (function (id) { return function (ev) { ev.stopPropagation(); scrollToMsg(id); }; })(m.replyTo.id));
+        b.appendChild(q);
+      }
+      var body = document.createElement('div'); fillText(body, m.text, mentions); b.appendChild(body);
+      b.setAttribute('role', 'button'); b.tabIndex = 0;
+      b.setAttribute('aria-label', m.name + 'のメッセージ。操作を開く');
+      b.addEventListener('click', (function (id) { return function () { openActions(id); }; })(m.id));
+      b.addEventListener('keydown', (function (id) { return function (ev) { if (ev.key === 'Enter') openActions(id); }; })(m.id));
+    }
     var at = document.createElement('div'); at.className = 'at'; at.textContent = m.at;
     var meta = document.createElement('div'); meta.className = 'meta';
     var n = (m.readBy || []).length;
-    if (m.name === state.name && n > 0) {
+    if (m.name === state.name && n > 0 && !m.deleted) {
       var rb = document.createElement('button'); rb.type = 'button'; rb.className = 'readmark';
       rb.textContent = '既読 ' + n;
       rb.setAttribute('aria-label', '既読 ' + n + '人。タップで名前を表示');
@@ -356,12 +424,33 @@ function render(messages) {
   } else if (nearBottom || box.dataset.first !== '1') { box.scrollTop = box.scrollHeight; box.dataset.first = '1'; }
 }
 
+/** 本文を表示用に組み立てる。メンション（@名前）は色を付けて強調する（innerHTMLは使わない） */
+function fillText(el, text, mentionNames) {
+  var names = (mentionNames || []).slice().sort(function (a, b) { return b.length - a.length; }); // 長い名前を先に照合
+  if (!names.length) { el.textContent = text; return; }
+  var alt = names.map(function (n) { return n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|');
+  var parts = text.split(new RegExp('(@(?:' + alt + '))')); // 括弧で囲むので、奇数番目が@名前の部分
+  parts.forEach(function (p, i) {
+    if (i % 2 === 1) { var s = document.createElement('span'); s.className = 'mention'; s.textContent = p; el.appendChild(s); }
+    else if (p) el.appendChild(document.createTextNode(p));
+  });
+}
+
+/** 引用をタップした時に、元のメッセージまで移動して一瞬ハイライトする */
+function scrollToMsg(id) {
+  var el = $('m-' + id), box = $('list');
+  if (!el) { toast('元のメッセージは、表示している範囲より前にあります'); return; }
+  box.scrollTop = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 12;
+  el.classList.add('flash');
+  setTimeout(function () { el.classList.remove('flash'); }, 1500);
+}
+
 /** 開く前に自分が読んでいた位置より後ろで、最初の「他の人のメッセージ」を返す（初回入室や未読なしは空） */
 function findUnread(messages, myLast) {
   if (!myLast) return '';
   var pos = -1, i;
   for (i = 0; i < messages.length; i++) { if (messages[i].id === myLast) { pos = i; break; } }
-  for (i = pos + 1; i < messages.length; i++) { if (messages[i].name !== state.name) return messages[i].id; }
+  for (i = pos + 1; i < messages.length; i++) { if (messages[i].name !== state.name && !messages[i].deleted) return messages[i].id; }
   return '';
 }
 
@@ -371,7 +460,8 @@ function refresh() {
   api('list', { name: state.name, area: area, areas: state.areas }).then(function (j) {
     if (area !== state.area) return; // 通信中に部屋を切り替えた場合は、古い部屋の結果を捨てる
     state.msgs = j.messages;
-    var ou = (j.unreadAreas || []).join(',');
+    state.members = j.members || [];
+    var ou =(j.unreadAreas || []).join(',');
     if (ou !== state.otherUnread.join(',')) { state.otherUnread = j.unreadAreas || []; renderTabs(); }
     // 開いた直後の1回だけ、既読位置（markReadで進める前の値）から未読の線の位置を決める
     if (state.sessionStart) {
@@ -409,21 +499,117 @@ function openReaders(id) {
 function closeReaders() { $('sheetBg').style.display = 'none'; }
 $('sheetClose').addEventListener('click', closeReaders);
 $('sheetBg').addEventListener('click', function (ev) { if (ev.target === $('sheetBg')) closeReaders(); });
-document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeReaders(); });
+document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { closeReaders(); closeActions(); } });
 setInterval(refresh, 5000);
 
-/* ---------- 送信 ---------- */
-var ta = $('text');
-ta.addEventListener('input', function () {
-  ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+/* ---------- メッセージの操作（返信・コピー・取り消し） ---------- */
+var actMsg = null;
+function findMsg(id) {
+  for (var i = 0; i < state.msgs.length; i++) { if (state.msgs[i].id === id) return state.msgs[i]; }
+  return null;
+}
+function openActions(id) {
+  var m = findMsg(id);
+  if (!m || m.deleted) return;
+  actMsg = m;
+  $('actPreview').textContent = m.name + '：' + m.text;
+  $('actUnsend').style.display = (m.name === state.name) ? 'block' : 'none'; // 取り消せるのは自分のメッセージだけ
+  $('actBg').style.display = 'flex';
+  $('actReply').focus();
+}
+function closeActions() { $('actBg').style.display = 'none'; actMsg = null; }
+$('actClose').addEventListener('click', closeActions);
+$('actBg').addEventListener('click', function (ev) { if (ev.target === $('actBg')) closeActions(); });
+
+$('actReply').addEventListener('click', function () {
+  if (!actMsg) return;
+  state.replyTo = { id: actMsg.id, name: actMsg.name, text: actMsg.text };
+  closeActions(); showReplyBar(); $('text').focus();
 });
+$('actCopy').addEventListener('click', function () {
+  var text = actMsg ? actMsg.text : '';
+  closeActions();
+  try {
+    navigator.clipboard.writeText(text).then(function () { toast('コピーしました'); }, function () { toast('コピーできませんでした'); });
+  } catch (e) { toast('コピーできませんでした'); }
+});
+$('actUnsend').addEventListener('click', function () {
+  if (!actMsg) return;
+  var id = actMsg.id;
+  closeActions();
+  if (!window.confirm('このメッセージの送信を取り消しますか？\n全員の画面で「取り消されました」に変わります。\n（すでに届いた通知は消えません）')) return;
+  api('unsend', { name: state.name, area: state.area, id: id }).then(function () {
+    toast('送信を取り消しました');
+    refresh();
+  }).catch(function (e) { toast('取り消せませんでした：' + e.message); });
+});
+
+function showReplyBar() {
+  var r = state.replyTo;
+  $('replyBar').style.display = r ? 'flex' : 'none';
+  if (r) { $('replyWho').textContent = r.name + ' に返信'; $('replyText').textContent = r.text; }
+}
+$('replyCancel').addEventListener('click', function () { state.replyTo = null; showReplyBar(); });
+
+/* ---------- 送信・メンション ---------- */
+var ta = $('text');
+function resizeTa() { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 120) + 'px'; }
+ta.addEventListener('input', function () { resizeTa(); updateMention(); });
+ta.addEventListener('click', updateMention);
+ta.addEventListener('keyup', function (ev) { if (ev.key.indexOf('Arrow') === 0) updateMention(); });
+
+function hideMention() { $('mentionBox').style.display = 'none'; }
+// 入力中のカーソル直前が「@○○」なら、名前の候補（@全員を含む）を出す
+function updateMention() {
+  var pos = ta.selectionStart, before = ta.value.slice(0, pos);
+  var m = /@([^\s@]*)$/.exec(before);
+  if (!m) { hideMention(); return; }
+  var q = m[1];
+  var names = ['全員'].concat(state.members.filter(function (n) { return n !== state.name; }))
+    .filter(function (n) { return n.indexOf(q) !== -1; }).slice(0, 8);
+  if (!names.length) { hideMention(); return; }
+  var box = $('mentionBox'); box.textContent = '';
+  names.forEach(function (n) {
+    var b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'option');
+    b.textContent = '@' + n;
+    b.addEventListener('click', function () { insertMention(n, m.index, pos); });
+    box.appendChild(b);
+  });
+  box.style.display = 'block';
+}
+function insertMention(name, start, end) {
+  ta.value = ta.value.slice(0, start) + '@' + name + ' ' + ta.value.slice(end);
+  var p = start + name.length + 2;
+  hideMention(); resizeTa(); ta.focus(); ta.setSelectionRange(p, p);
+}
+$('btnAt').addEventListener('click', function () {
+  var pos = ta.selectionStart;
+  ta.value = ta.value.slice(0, pos) + '@' + ta.value.slice(ta.selectionEnd);
+  ta.focus(); ta.setSelectionRange(pos + 1, pos + 1); updateMention();
+});
+
+/** 本文中の「@名前」から、メンション先の名前の一覧を作る（長い名前を先に照合して、@松井 と @松井太郎 を取り違えない） */
+function collectMentions(text) {
+  var names = ['全員'].concat(state.members).filter(function (n) { return n !== state.name; })
+    .sort(function (a, b) { return b.length - a.length; });
+  var t = text, out = [];
+  names.forEach(function (n) {
+    if (t.indexOf('@' + n) !== -1) { out.push(n); t = t.split('@' + n).join(' '); }
+  });
+  return out;
+}
+
 $('send').addEventListener('submit', function (ev) {
   ev.preventDefault();
   var text = ta.value.trim();
   if (!text) return;
   $('btnSend').disabled = true;
-  api('send', { name: state.name, text: text, token: state.token, area: state.area }).then(function () {
+  api('send', {
+    name: state.name, text: text, token: state.token, area: state.area,
+    replyTo: state.replyTo ? state.replyTo.id : '', mentions: collectMentions(text)
+  }).then(function () {
     ta.value = ''; ta.style.height = 'auto';
+    state.replyTo = null; showReplyBar(); hideMention();
     refresh();
   }).catch(function (e) {
     toast('送信できませんでした：' + e.message);
