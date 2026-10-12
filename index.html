@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>巡回チャット</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="巡回チャット">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1E3A5F">
+<style>
+  :root {
+    --navy: #1E3A5F;
+    --navy-dark: #152B47;
+    --bg: #E9EDF2;
+    --mine: #1E3A5F;
+    --other: #FFFFFF;
+    --alert: #E8590C;
+    --text: #1B2430;
+    --sub: #6B7785;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-text-size-adjust: 100%;
+  }
+  #app { display: flex; flex-direction: column; height: 100%; }
+  header {
+    background: var(--navy);
+    color: #fff;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 700; letter-spacing: .02em; }
+  header .me { font-size: 12px; opacity: .8; }
+  #banner {
+    background: #FFF3E0; color: #7A3E00; font-size: 13px; line-height: 1.6;
+    padding: 10px 16px; display: none; border-bottom: 1px solid #F2D4A8;
+  }
+  #banner button {
+    margin-top: 6px; font-size: 14px; padding: 8px 14px; border: 0; border-radius: 8px;
+    background: var(--alert); color: #fff; font-weight: 700;
+  }
+  #list { flex: 1; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
+  .msg { max-width: 80%; margin: 0 0 10px; }
+  .msg .who { font-size: 11px; color: var(--sub); margin: 0 4px 2px; }
+  .msg .bubble {
+    padding: 9px 12px; border-radius: 14px; font-size: 15px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word; background: var(--other);
+    border-top-left-radius: 4px;
+  }
+  .msg .at { font-size: 10px; color: var(--sub); margin: 2px 4px 0; }
+  .msg.mine { margin-left: auto; }
+  .msg.mine .who, .msg.mine .at { text-align: right; }
+  .msg.mine .bubble { background: var(--mine); color: #fff; border-top-left-radius: 14px; border-top-right-radius: 4px; }
+  .empty { text-align: center; color: var(--sub); font-size: 13px; margin-top: 40px; }
+  form#send {
+    display: flex; gap: 8px; padding: 8px 10px calc(env(safe-area-inset-bottom, 0px) + 8px);
+    background: #fff; border-top: 1px solid #D5DBE3;
+  }
+  form#send textarea {
+    flex: 1; resize: none; border: 1px solid #C7CFDA; border-radius: 18px;
+    padding: 9px 14px; font-size: 16px; font-family: inherit; max-height: 120px; line-height: 1.4;
+  }
+  form#send button {
+    border: 0; background: var(--navy); color: #fff; font-weight: 700; font-size: 15px;
+    border-radius: 18px; padding: 0 18px;
+  }
+  form#send button:disabled { opacity: .45; }
+  button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 3px solid #7FB0F0; outline-offset: 2px; }
+
+  #setup { display: none; flex: 1; padding: 28px 22px; overflow-y: auto; }
+  #setup h2 { font-size: 20px; margin: 0 0 6px; }
+  #setup p { font-size: 14px; color: var(--sub); line-height: 1.7; margin: 0 0 20px; }
+  #setup label { display: block; font-size: 13px; font-weight: 700; margin: 14px 0 6px; }
+  #setup input {
+    width: 100%; font-size: 17px; padding: 12px; border: 1px solid #C7CFDA; border-radius: 10px; background: #fff;
+  }
+  #setup button {
+    margin-top: 22px; width: 100%; font-size: 16px; font-weight: 700; padding: 14px;
+    border: 0; border-radius: 10px; background: var(--navy); color: #fff;
+  }
+  #err { color: #C62828; font-size: 13px; margin-top: 12px; min-height: 18px; }
+  #toast {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 76px);
+    background: #222; color: #fff; padding: 8px 14px; border-radius: 16px; font-size: 13px; display: none;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>巡回チャット</h1>
+    <span class="me" id="me"></span>
+  </header>
+
+  <div id="banner"></div>
+
+  <section id="setup">
+    <h2>はじめに設定します</h2>
+    <p>名前と合言葉は、この端末に保存されます。次回からは入力不要です。</p>
+    <label for="inName">お名前（チャットに表示されます）</label>
+    <input id="inName" autocomplete="off" placeholder="例：松井">
+    <label for="inCode">合言葉</label>
+    <input id="inCode" type="password" autocomplete="off" placeholder="管理者から聞いた合言葉">
+    <button id="btnStart" type="button">チャットを始める</button>
+    <div id="err"></div>
+  </section>
+
+  <main id="list" style="display:none"></main>
+
+  <form id="send" style="display:none">
+    <textarea id="text" rows="1" placeholder="メッセージを入力"></textarea>
+    <button id="btnSend" type="submit">送信</button>
+  </form>
+</div>
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
+<script>
+// ★ここ1か所だけ、Apps ScriptのウェブアプリURLに書き換える（/exec で終わるURL）
+var GAS_URL = 'https://script.google.com/a/macros/mizken.jp/s/AKfycbzHHRTmzwFqvAXTIG8xxYXwdsqbnezSHG4bQ0UPcO-HUWdKUVbEkQ_2H0gOPeHJl4pe5w/exec';
+
+var VAPID_KEY = 'BEkNoUz_adPTWoQgkoaJXsjrs3UbTWewt0uLGaSYePMtH0FWUxjdtOSNwbSmMTLhmNz-EP9wgYWbSvrHROkjXMg';
+var FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyAYUmDUQ-ft3hjVU7WBXyFvrMt2sXXEmoA',
+  authDomain: 'junkai-chat.firebaseapp.com',
+  projectId: 'junkai-chat',
+  storageBucket: 'junkai-chat.firebasestorage.app',
+  messagingSenderId: '592199751504',
+  appId: '1:592199751504:web:d5e05642dc61610d33fe55'
+};
+
+var $ = function (id) { return document.getElementById(id); };
+var store = {
+  get: function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
+  set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+};
+var state = { name: store.get('jc_name'), code: store.get('jc_code'), token: store.get('jc_token'), lastJson: '' };
+
+function toast(msg) {
+  var t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  setTimeout(function () { t.style.display = 'none'; }, 2500);
+}
+
+function api(action, payload) {
+  var body = Object.assign({ action: action, code: state.code }, payload || {});
+  return fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // プリフライトを避けるためtext/plainで送る
+    body: JSON.stringify(body)
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    if (!j.ok) throw new Error(j.error || '通信に失敗しました。');
+    return j;
+  });
+}
+
+/* ---------- 画面切り替え ---------- */
+function showSetup() {
+  $('setup').style.display = 'block';
+  $('list').style.display = 'none';
+  $('send').style.display = 'none';
+}
+function showChat() {
+  $('setup').style.display = 'none';
+  $('list').style.display = 'block';
+  $('send').style.display = 'flex';
+  $('me').textContent = state.name;
+  refresh(true);
+  updateBanner();
+}
+
+$('btnStart').addEventListener('click', function () {
+  var n = $('inName').value.trim(), c = $('inCode').value.trim();
+  if (!n || !c) { $('err').textContent = '名前と合言葉を入力してください。'; return; }
+  $('err').textContent = '確認中…';
+  state.code = c; state.name = n;
+  api('list').then(function () {
+    store.set('jc_name', n); store.set('jc_code', c);
+    $('err').textContent = '';
+    showChat();
+  }).catch(function (e) {
+    $('err').textContent = '入室できませんでした：' + e.message;
+  });
+});
+
+/* ---------- メッセージ表示 ---------- */
+function render(messages) {
+  var json = JSON.stringify(messages);
+  if (json === state.lastJson) return;
+  state.lastJson = json;
+  var box = $('list');
+  var nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  box.textContent = '';
+  if (messages.length === 0) {
+    var em = document.createElement('div'); em.className = 'empty';
+    em.textContent = 'まだメッセージはありません。最初の一言を送ってみましょう。';
+    box.appendChild(em);
+    return;
+  }
+  messages.forEach(function (m) {
+    var wrap = document.createElement('div');
+    wrap.className = 'msg' + (m.name === state.name ? ' mine' : '');
+    var who = document.createElement('div'); who.className = 'who'; who.textContent = m.name;
+    var b = document.createElement('div'); b.className = 'bubble'; b.textContent = m.text;
+    var at = document.createElement('div'); at.className = 'at'; at.textContent = m.at;
+    if (m.name !== state.name) wrap.appendChild(who);
+    wrap.appendChild(b); wrap.appendChild(at);
+    box.appendChild(wrap);
+  });
+  if (nearBottom || box.dataset.first !== '1') { box.scrollTop = box.scrollHeight; box.dataset.first = '1'; }
+}
+
+function refresh() {
+  if (!state.name || !state.code || document.visibilityState !== 'visible') return;
+  api('list').then(function (j) { render(j.messages); }).catch(function () {});
+}
+setInterval(refresh, 5000);
+
+/* ---------- 送信 ---------- */
+var ta = $('text');
+ta.addEventListener('input', function () {
+  ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+});
+$('send').addEventListener('submit', function (ev) {
+  ev.preventDefault();
+  var text = ta.value.trim();
+  if (!text) return;
+  $('btnSend').disabled = true;
+  api('send', { name: state.name, text: text, token: state.token }).then(function () {
+    ta.value = ''; ta.style.height = 'auto';
+    refresh();
+  }).catch(function (e) {
+    toast('送信できませんでした：' + e.message);
+  }).then(function () { $('btnSend').disabled = false; });
+});
+
+/* ---------- 通知 ---------- */
+function isStandalone() {
+  return window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+}
+
+function updateBanner() {
+  var b = $('banner');
+  b.style.display = 'none'; b.textContent = '';
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+    if (!isStandalone()) {
+      b.textContent = '通知を受け取るには、Safariの共有ボタンから「ホーム画面に追加」して、追加したアイコンから開いてください。';
+      b.style.display = 'block';
+    }
+    return;
+  }
+  if (Notification.permission === 'granted') { enablePush(true); return; }
+  if (Notification.permission === 'denied') {
+    b.textContent = '通知がオフになっています。iPhoneの「設定」→「通知」→「巡回チャット」でオンにしてください。';
+    b.style.display = 'block';
+    return;
+  }
+  b.textContent = '新着メッセージを通知で受け取れます。';
+  b.appendChild(document.createElement('br'));
+  var btn = document.createElement('button'); btn.type = 'button'; btn.textContent = '通知をオンにする';
+  btn.addEventListener('click', function () { enablePush(false); });
+  b.appendChild(btn);
+  b.style.display = 'block';
+}
+
+function enablePush(silent) {
+  firebase.initializeApp(FIREBASE_CONFIG);
+  var messaging = firebase.messaging();
+  var p = (Notification.permission === 'granted') ? Promise.resolve('granted') : Notification.requestPermission();
+  return p.then(function (perm) {
+    if (perm !== 'granted') { updateBanner(); return; }
+    return navigator.serviceWorker.register('firebase-messaging-sw.js').then(function (reg) {
+      return navigator.serviceWorker.ready.then(function () {
+        return messaging.getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+      });
+    }).then(function (token) {
+      if (!token) throw new Error('通知トークンを取得できませんでした。');
+      state.token = token; store.set('jc_token', token);
+      return api('register', { name: state.name, token: token });
+    }).then(function () {
+      $('banner').style.display = 'none';
+      if (!silent) toast('通知をオンにしました');
+    });
+  }).catch(function (e) {
+    var b = $('banner');
+    b.textContent = '通知の設定に失敗しました：' + e.message + '（ホーム画面に追加したアイコンから開いているか確認してください）';
+    b.style.display = 'block';
+  });
+}
+
+/* ---------- バッジ・通知のクリア ---------- */
+function clearBadge() {
+  try { if (navigator.clearAppBadge) navigator.clearAppBadge(); } catch (e) {}
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistration().then(function (reg) {
+      if (!reg) return;
+      reg.getNotifications().then(function (list) { list.forEach(function (n) { n.close(); }); });
+    }).catch(function () {});
+  }
+}
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible') { clearBadge(); refresh(); }
+});
+
+/* ---------- 起動 ---------- */
+if (state.name && state.code) { showChat(); clearBadge(); } else { showSetup(); }
+</script>
+</body>
+</html>
