@@ -73,6 +73,17 @@
     #setup { max-width: 520px; width: 100%; margin: 0 auto; }
   }
 
+  .searchbar { display: flex; gap: 6px; align-items: center; padding: 6px 12px; background: #EEF2F7; border-bottom: 1px solid #D5DBE3; }
+  .searchbar .sbtn { background: #fff; border: 1px solid #C7CFDA; border-radius: 16px; padding: 6px 14px; font-size: 14px; color: var(--sub); cursor: pointer; }
+  .searchbar .sinput { flex: 1; min-width: 0; font-size: 16px; padding: 7px 12px; border: 1px solid #C7CFDA; border-radius: 16px; }
+  .searchbar .sclose { background: none; border: 0; font-size: 22px; line-height: 1; padding: 4px 10px; color: var(--sub); cursor: pointer; }
+  .spane { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px; -webkit-overflow-scrolling: touch; }
+  .spane[hidden] { display: none; }
+  .spane .sinfo { font-size: 12px; color: var(--sub); margin: 4px 2px 8px; }
+  .spane .sres { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid #D5DBE3; border-radius: 10px; padding: 8px 12px; margin: 0 0 8px; cursor: pointer; font: inherit; color: inherit; }
+  .spane .sres .sm { font-size: 11px; color: var(--sub); margin-bottom: 2px; }
+  .spane .sres .st { font-size: 14px; word-break: break-word; }
+  .spane mark { background: #FFE58A; color: inherit; border-radius: 2px; padding: 0 1px; }
   .list { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; -webkit-overflow-scrolling: touch; }
   .msg { max-width: min(80%, 560px); margin: 0 0 10px; }
   .msg .who { font-size: 11px; color: var(--sub); margin: 0 4px 2px; }
@@ -235,6 +246,12 @@
 <template id="roomTpl">
   <section class="room">
     <div class="room-head"><span class="room-name"></span></div>
+    <div class="searchbar">
+      <button class="sbtn" type="button" aria-label="このルームの履歴を検索">🔍 検索</button>
+      <input class="sinput" type="search" placeholder="キーワード（全履歴から検索）" aria-label="キーワード" hidden>
+      <button class="sclose" type="button" aria-label="検索を閉じる" hidden>×</button>
+    </div>
+    <div class="spane" hidden></div>
     <main class="list"></main>
     <div class="replyBar">
       <div class="rt"><div class="replyWho"></div><div class="replyText"></div></div>
@@ -365,6 +382,7 @@ function makeRoom(area) {
     scrollToDivider: false, replyTo: null, visible: false, first: false
   };
   q('.room-name').textContent = area;
+  setupSearch(r);
   q('.replyCancel').addEventListener('click', function () { r.replyTo = null; showReplyBar(r); });
   r.ta.addEventListener('input', function () { resizeTa(r); updateMention(r); });
   r.ta.addEventListener('click', function () { updateMention(r); });
@@ -378,9 +396,69 @@ function makeRoom(area) {
   return r;
 }
 
+/* ---------- チャット内検索（この部屋の全履歴。サーバーで探す） ---------- */
+function setupSearch(r) {
+  var bar = r.el.querySelector('.searchbar'), btn = bar.querySelector('.sbtn'), inp = bar.querySelector('.sinput'), cls = bar.querySelector('.sclose');
+  r.spane = r.el.querySelector('.spane'); r.sinput = inp; r.sbtn = btn; r.sclose = cls; r.sseq = 0; r.stimer = null;
+  btn.addEventListener('click', function () { openSearch(r); });
+  cls.addEventListener('click', function () { closeSearch(r); });
+  inp.addEventListener('input', function () { clearTimeout(r.stimer); r.stimer = setTimeout(function () { runSearch(r); }, 300); });
+  inp.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeSearch(r); if (ev.key === 'Enter') { clearTimeout(r.stimer); runSearch(r); } });
+}
+function openSearch(r) {
+  r.sbtn.hidden = true; r.sinput.hidden = false; r.sclose.hidden = false;
+  r.spane.hidden = false; r.list.style.display = 'none'; r.spane.textContent = '';
+  r.sinput.value = ''; r.sinput.focus();
+}
+function closeSearch(r) {
+  if (!r.sbtn) return;
+  clearTimeout(r.stimer); r.sseq++;
+  r.sbtn.hidden = false; r.sinput.hidden = true; r.sclose.hidden = true;
+  r.spane.hidden = true; r.spane.textContent = ''; r.list.style.display = '';
+}
+function markText(el, text, q) {
+  var low = text.toLowerCase(), ql = q.toLowerCase(), pos = 0, i;
+  while (ql && (i = low.indexOf(ql, pos)) !== -1) {
+    if (i > pos) el.appendChild(document.createTextNode(text.slice(pos, i)));
+    var m = document.createElement('mark'); m.textContent = text.slice(i, i + q.length); el.appendChild(m);
+    pos = i + q.length;
+  }
+  if (pos < text.length) el.appendChild(document.createTextNode(text.slice(pos)));
+}
+function runSearch(r) {
+  var q = r.sinput.value.trim(), seq = ++r.sseq, pane = r.spane;
+  pane.textContent = '';
+  if (!q) return;
+  var info = document.createElement('div'); info.className = 'sinfo'; info.textContent = '検索中…'; pane.appendChild(info);
+  api('search', { name: state.name, area: r.area, q: q }).then(function (j) {
+    if (seq !== r.sseq) return; // 新しい検索が始まっていたら、古い結果は捨てる
+    pane.textContent = '';
+    var inf = document.createElement('div'); inf.className = 'sinfo';
+    inf.textContent = j.total === 0 ? '見つかりませんでした' : (j.total + '件見つかりました' + (j.total > j.results.length ? '（新しい順に' + j.results.length + '件を表示）' : ''));
+    pane.appendChild(inf);
+    j.results.forEach(function (x) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'sres';
+      var meta = document.createElement('div'); meta.className = 'sm'; meta.textContent = x.at + '　' + x.name;
+      var t = document.createElement('div'); t.className = 'st'; markText(t, x.snippet, q);
+      b.appendChild(meta); b.appendChild(t);
+      b.addEventListener('click', function () {
+        // 今表示している範囲にあれば、その場所へ移動。古いものは、検索結果の本文で確認してもらう
+        var inList = r.msgs.some(function (m) { return m.id === x.id; });
+        if (!inList) { toast('古いメッセージのため、一覧には表示されません'); return; }
+        closeSearch(r); scrollToMsg(r, x.id);
+      });
+      pane.appendChild(b);
+    });
+  }).catch(function (e) {
+    if (seq !== r.sseq) return;
+    pane.textContent = ''; var inf = document.createElement('div'); inf.className = 'sinfo'; inf.textContent = '検索できませんでした：' + (e.message || e); pane.appendChild(inf);
+  });
+}
+
 function resetSession(r) { r.sessionStart = true; r.unreadFromId = ''; r.scrollToDivider = false; }
 // 部屋の表示内容をまっさらにする（表示し直す時・名前やエリアを変えた時）
 function resetRoom(r) {
+  closeSearch(r);
   r.lastJson = ''; r.msgs = []; r.members = []; r.readSent = ''; r.first = false;
   r.list.textContent = ''; r.replyTo = null; showReplyBar(r); hideMention(r);
   resetSession(r);
