@@ -184,6 +184,7 @@
   .cd.head { font-weight: 700; margin-bottom: 4px; }
   .cd.head.alert { color: #D32F2F; }
   .cd.head.ok { color: #2E7D32; }
+  .cd.head.info { color: #1565C0; }
   .cd.label { font-size: 12px; font-weight: 700; margin-top: 6px; }
   .cd.red, .cd.label.red { color: #D32F2F; }
   .cd.blue, .cd.label.blue { color: #1565C0; }
@@ -225,8 +226,8 @@
   <section id="setup">
     <h2>はじめに設定します</h2>
     <p>名前とPASSは、この端末に保存されます。次回からは入力不要です。</p>
-    <label for="inName">お名前（チャットに表示されます）</label>
-    <input id="inName" autocomplete="off" placeholder="例：松井">
+    <label for="inName">お名前（チャットに表示されます。電話番号・メールアドレスは入れないでください）</label>
+    <input id="inName" type="text" name="chat-display-name" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="例：松井 武史">
     <label for="inCode">PASS</label>
     <input id="inCode" type="password" autocomplete="off" placeholder="管理者から聞いたPASS">
     <label id="areaLabel">担当エリア</label>
@@ -337,7 +338,13 @@ function api(action, payload) {
         showSetup();
         $('err').textContent = 'PASSが変更されました。新しいPASSを入力してください。';
       }
-      throw new Error(j.error || '通信に失敗しました。');
+      // 名前が電話番号・メールアドレスなどで保存されていた端末は、名前だけ入れ直してもらう（PASSは残す）
+      if (state.inChat && String(j.error || '').indexOf('NAME_INVALID') === 0) {
+        store.set('jc_name', ''); state.name = '';
+        showSetup();
+        $('err').textContent = 'お名前を、電話番号・メールアドレス以外（例：松井 武史）で入れ直してください。';
+      }
+      throw new Error(String(j.error || '通信に失敗しました。').replace(/^NAME_INVALID:\s*/, ''));
     }
     return j;
   });
@@ -520,10 +527,18 @@ function switchArea(a) {
   refresh();
 }
 
+/** 名前の空白（全角・連続）をそろえる。「齋藤　華奈」と「齋藤 華奈」が別人にならないように */
+function normName(s) { return String(s || '').replace(/[\s\u3000]+/g, ' ').trim(); }
+/** 電話番号・メールアドレスのような名前は不可（サーバー側と同じ基準） */
+function nameLooksBad(n) {
+  return !n || n.length > 30 || n.indexOf('@') !== -1 || /\d{5,}/.test(n) || /^[\d\s\-+()]+$/.test(n);
+}
+
 $('btnStart').addEventListener('click', function () {
-  var n = $('inName').value.trim(), c = $('inCode').value.trim();
+  var n = normName($('inName').value), c = $('inCode').value.trim();
   var picked = document.querySelector('input[name="area"]:checked');
   if (!n || !c) { $('err').textContent = '名前とPASSを入力してください。'; return; }
+  if (nameLooksBad(n)) { $('err').textContent = 'お名前は、電話番号・メールアドレス以外（例：松井 武史）で入力してください。'; return; }
   if (!picked) { $('err').textContent = '担当エリアを選んでください。'; return; }
   var areas = parseAreas(picked.value);
   $('err').textContent = '確認中…';
@@ -636,10 +651,11 @@ function renderCard(el, text) {
   }
   lines.forEach(function (ln, i) {
     var m;
-    if (i === 0) { add('head ' + (ln.indexOf('✅') === 0 ? 'ok' : 'alert'), ln); return; }
+    if (i === 0) { add('head ' + (ln.indexOf('✅') === 0 ? 'ok' : /^(✋|🔧|👀)/.test(ln) ? 'info' : 'alert'), ln); return; }
     if (/^[―\-─]{4,}$/.test(ln)) { var hr = document.createElement('div'); hr.className = 'cd-hr'; el.appendChild(hr); return; }
     if (ln === '【内容】') { mode = 'red'; add('label red', '内容'); return; }
     if (ln === '【コメント】') { mode = 'blue'; add('label blue', 'コメント'); return; }
+    if (ln === '【進捗】') { mode = 'blue'; add('label blue', '進捗'); return; }
     if (/^(対応者: |写真: )/.test(ln) || ln.indexOf('▶') === 0) { if (!/^対応者: /.test(ln) || mode === 'red') mode = ''; }
     if ((m = ln.match(/^▶(.+?)\s+(https?:\/\/[A-Za-z0-9\-._~:\/?#\[\]@!$&'()*+,;=%]+)$/))) { link(m[1], m[2], 'btn'); return; }
     if ((m = ln.match(/^https?:\/\/[A-Za-z0-9\-._~:\/?#\[\]@!$&'()*+,;=%]+$/))) { photo++; link('📷 写真' + photo + 'を開く', ln, 'photo'); return; }
